@@ -1,0 +1,40 @@
+# COLMAP Pipeline Configuration
+
+colmap:
+  # Camera model
+  camera_model: "PINHOLE"
+
+  # Feature extraction
+  features:
+    max_num_features: 8192
+    upright: false
+
+  # Matching
+  matching:
+    method: "exhaustive"  # exhaustive for small datasets
+    cross_check: true
+
+  # Incremental reconstruction
+  reconstruction:
+    multiple_models: true
+    max_num_models: 50
+    max_model_overlap: 20
+    min_model_size: 10
+    min_num_matches: 15
+
+  # Bundle adjustment
+  bundle_adjustment:
+    refine_focal_length: true
+    refine_principal_point: false
+    refine_extra_params: true
+
+  # Threading
+  num_threads: -1  # -1 = use all available cores
+
+# Evaluation metrics
+metrics:
+  # Completeness threshold (meters)
+  completeness_threshold: 0.10  # 10 cm
+
+  # Alignment method for GT comparison
+  alignment_method: "sim3"  # or "procrustes"

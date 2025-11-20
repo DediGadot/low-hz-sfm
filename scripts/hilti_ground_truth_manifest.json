@@ -1,0 +1,58 @@
+[
+  {
+    "name": "site1_poses.txt",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site1_poses.txt",
+    "size_mb": 75,
+    "site": "site1",
+    "type": "poses",
+    "description": "Site 1 handheld trajectory ground-truth (TUM format)"
+  },
+  {
+    "name": "site1_ground_truth_points.ply",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site1_ground_truth_points.ply",
+    "size_mb": 1550,
+    "site": "site1",
+    "type": "point_cloud",
+    "description": "Site 1 fused survey point cloud"
+  },
+  {
+    "name": "site1_camera_calibration.yaml",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site1_camera_calibration.yaml",
+    "size_mb": 2,
+    "site": "site1",
+    "type": "calibration",
+    "description": "Site 1 Alphasense intrinsics/extrinsics"
+  },
+  {
+    "name": "site2_poses.txt",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site2_poses.txt",
+    "size_mb": 80,
+    "site": "site2",
+    "type": "poses",
+    "description": "Site 2 GNSS ground-truth poses"
+  },
+  {
+    "name": "site2_ground_truth_points.ply",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site2_ground_truth_points.ply",
+    "size_mb": 2100,
+    "site": "site2",
+    "type": "point_cloud",
+    "description": "Site 2 fused point cloud"
+  },
+  {
+    "name": "site3_poses.txt",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site3_poses.txt",
+    "size_mb": 65,
+    "site": "site3",
+    "type": "poses",
+    "description": "Site 3 tunnel trajectory ground-truth"
+  },
+  {
+    "name": "site3_ground_truth_points.ply",
+    "url": "https://tp-public-facing.s3.eu-north-1.amazonaws.com/Challenges/2023/REPLACE_WITH_SIGNED_URL/site3_ground_truth_points.ply",
+    "size_mb": 980,
+    "site": "site3",
+    "type": "point_cloud",
+    "description": "Site 3 fused point cloud"
+  }
+]

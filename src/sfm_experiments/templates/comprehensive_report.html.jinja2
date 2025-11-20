@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LaMAR SfM Reconstruction Report</title>
+    <!-- Plotly.js from CDN (single reference for all charts) -->
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #27ae60;
+            --background-color: #ecf0f1;
+            --card-background: #ffffff;
+            --border-color: #bdc3c7;
+            --text-color: #2c3e50;
+            --header-height: 60px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 20px 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .header .subtitle {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .container {
+            display: flex;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: var(--card-background);
+            padding: 20px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+            position: sticky;
+            top: var(--header-height);
+            height: calc(100vh - var(--header-height));
+            overflow-y: auto;
+        }
+
+        .sidebar h3 {
+            font-size: 16px;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .sidebar nav ul {
+            list-style: none;
+        }
+
+        .sidebar nav li {
+            margin-bottom: 8px;
+        }
+
+        .sidebar nav a {
+            color: var(--text-color);
+            text-decoration: none;
+            display: block;
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .sidebar nav a:hover {
+            background: var(--background-color);
+            color: var(--secondary-color);
+            transform: translateX(5px);
+        }
+
+        .sidebar nav .sub-item {
+            padding-left: 24px;
+            font-size: 13px;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 30px;
+        }
+
+        .section {
+            background: var(--card-background);
+            border-radius: 8px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .section h2 {
+            color: var(--primary-color);
+            font-size: 24px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid var(--secondary-color);
+        }
+
+        .section h3 {
+            color: var(--text-color);
+            font-size: 18px;
+            margin-top: 25px;
+            margin-bottom: 15px;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+
+        .summary-table thead {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .summary-table th,
+        .summary-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .summary-table th {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        .summary-table tbody tr:hover {
+            background: var(--background-color);
+        }
+
+        .summary-table tbody tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: var(--secondary-color);
+        }
+
+        .visualization-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 25px;
+            margin-top: 20px;
+        }
+
+        .viz-container {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+        }
+
+        .viz-container h4 {
+            color: var(--primary-color);
+            font-size: 15px;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--secondary-color);
+        }
+
+        .viz-content {
+            min-height: 400px;
+        }
+
+        .footer {
+            background: var(--card-background);
+            padding: 20px 30px;
+            text-align: center;
+            margin-top: 30px;
+            border-top: 3px solid var(--secondary-color);
+            font-size: 13px;
+            color: #7f8c8d;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 4px solid var(--secondary-color);
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .detail-accordion {
+            margin-top: 30px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .detail-accordion-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s;
+        }
+
+        .detail-accordion-header:hover {
+            background: var(--secondary-color);
+        }
+
+        .detail-accordion-header .toggle-icon {
+            font-size: 18px;
+            transition: transform 0.3s;
+        }
+
+        .detail-accordion-header.active .toggle-icon {
+            transform: rotate(180deg);
+        }
+
+        .detail-accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background: #f8f9fa;
+        }
+
+        .detail-accordion-content.active {
+            max-height: 2000px;
+            transition: max-height 0.5s ease-in;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .detail-section {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .detail-section h4 {
+            color: var(--primary-color);
+            font-size: 16px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--secondary-color);
+        }
+
+        .detail-table {
+            width: 100%;
+            font-size: 13px;
+        }
+
+        .detail-table tr {
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .detail-table td {
+            padding: 8px 0;
+        }
+
+        .detail-table td:first-child {
+            color: #6c757d;
+            width: 50%;
+        }
+
+        .detail-table td:last-child {
+            font-weight: 600;
+            color: var(--secondary-color);
+            text-align: right;
+        }
+
+        @media (max-width: 1200px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+
+            .visualization-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--background-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>LaMAR Structure-from-Motion Reconstruction Report</h1>
+        <div class="subtitle">
+            Generated: {{ generation_time }} | Scenes: {{ scene_names|join(', ') }}
+        </div>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar">
+            <h3>Navigation</h3>
+            <nav>
+                <ul>
+                    <li><a href="#summary">📊 Summary Statistics</a></li>
+                    <li><a href="#comparisons">📈 Cross-Scene Comparisons</a></li>
+                    {% for scene in scene_names %}
+                    <li>
+                        <a href="#{{ scene|lower }}">🏛️ {{ scene }} Scene</a>
+                        <ul>
+                            <li class="sub-item"><a href="#{{ scene|lower }}-point-cloud">Point Cloud</a></li>
+                            <li class="sub-item"><a href="#{{ scene|lower }}-density">Density Maps</a></li>
+                            <li class="sub-item"><a href="#{{ scene|lower }}-quality">Quality Metrics</a></li>
+                            <li class="sub-item"><a href="#{{ scene|lower }}-cameras">Camera Trajectory</a></li>
+                        </ul>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <!-- Summary Statistics Section -->
+            <section id="summary" class="section">
+                <h2>📊 Summary Statistics</h2>
+
+                <!-- Experiment Setup Information -->
+                <div class="info-box">
+                    <p><strong>Dataset:</strong> LaMAR (Localization and Mapping for Augmented Reality)</p>
+                    <p><strong>Reconstruction Method:</strong> Structure-from-Motion (SfM) with COLMAP</p>
+                    <p><strong>Total Scenes Analyzed:</strong> <span class="metric-value">{{ scene_names|length }}</span></p>
+                    {% if experiment_info %}
+                    <p><strong>Capture Device:</strong> {{ experiment_info.device_type|default('Mobile Phone (iOS)') }}</p>
+                    <p><strong>Image Resolution:</strong> {{ experiment_info.resolution|default('1440 × 1920 pixels') }}</p>
+                    <p><strong>Camera Model:</strong> {{ experiment_info.camera_model|default('PINHOLE') }}</p>
+                    {% endif %}
+                </div>
+
+                <!-- Enhanced Summary Table -->
+                <table class="summary-table">
+                    <thead>
+                        <tr>
+                            <th>Scene</th>
+                            <th>Images</th>
+                            <th>3D Points</th>
+                            <th>Capture Hz</th>
+                            <th>Volume (m³)</th>
+                            <th>Track (med)</th>
+                            <th>Error (med px)</th>
+                            <th>Pts/Img</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for scene in summary_stats %}
+                        <tr>
+                            <td><strong>{{ scene.scene_name }}</strong></td>
+                            <td class="metric-value">{{ scene.num_images }}</td>
+                            <td class="metric-value">{{ "{:,}".format(scene.num_points) }}</td>
+                            <td class="metric-value">{{ "%.2f"|format(scene.capture_frequency_hz|default(0)) }}</td>
+                            <td class="metric-value">{{ "%.1f"|format(scene.scene_volume_m3|default(0)) }}</td>
+                            <td class="metric-value">{{ "%.1f"|format(scene.median_track_length|default(0)) }}</td>
+                            <td class="metric-value">{{ "%.3f"|format(scene.median_reproj_error|default(0)) }}</td>
+                            <td class="metric-value">{{ "%.1f"|format(scene.points_per_image|default(0)) }}</td>
+                            <td><span class="badge badge-success">✓ Complete</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <!-- Expandable Detailed Statistics -->
+                <div class="detail-accordion">
+                    <div class="detail-accordion-header" onclick="toggleDetails()">
+                        <span>📋 Detailed Scene Statistics (Click to expand)</span>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+                    <div class="detail-accordion-content" id="detailContent">
+                        {% for scene in summary_stats %}
+                        <div class="detail-grid">
+                            <div class="detail-section">
+                                <h4>{{ scene.scene_name }} - Temporal Coverage</h4>
+                                <table class="detail-table">
+                                    <tr>
+                                        <td>Capture Duration</td>
+                                        <td>{{ "%.1f"|format(scene.capture_duration_s|default(0)) }} s</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Mean Capture Interval</td>
+                                        <td>{{ "%.2f"|format(scene.mean_capture_interval_s|default(0)) }} s</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Capture Frequency</td>
+                                        <td>{{ "%.2f"|format(scene.capture_frequency_hz|default(0)) }} Hz</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Images w/ Timestamp</td>
+                                        <td>{{ scene.num_images_with_timestamp|default(0) }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <div class="detail-section">
+                                <h4>{{ scene.scene_name }} - Spatial Coverage</h4>
+                                <table class="detail-table">
+                                    <tr>
+                                        <td>X Extent</td>
+                                        <td>{{ "%.2f"|format(scene.spatial_extent_x|default(0)) }} m</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Y Extent</td>
+                                        <td>{{ "%.2f"|format(scene.spatial_extent_y|default(0)) }} m</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Z Extent</td>
+                                        <td>{{ "%.2f"|format(scene.spatial_extent_z|default(0)) }} m</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Scene Volume</td>
+                                        <td>{{ "%.1f"|format(scene.scene_volume_m3|default(0)) }} m³</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Trajectory Length</td>
+                                        <td>{{ "%.2f"|format(scene.trajectory_length_m|default(0)) }} m</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <div class="detail-section">
+                                <h4>{{ scene.scene_name }} - Quality Distribution</h4>
+                                <table class="detail-table">
+                                    <tr>
+                                        <td>Track Length (mean)</td>
+                                        <td>{{ "%.2f"|format(scene.mean_track_length|default(0)) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Track Length (median)</td>
+                                        <td>{{ "%.2f"|format(scene.median_track_length|default(0)) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Track Length (P95)</td>
+                                        <td>{{ "%.2f"|format(scene.track_length_p95|default(0)) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Reproj Error (mean)</td>
+                                        <td>{{ "%.3f"|format(scene.mean_reproj_error|default(0)) }} px</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Reproj Error (median)</td>
+                                        <td>{{ "%.3f"|format(scene.median_reproj_error|default(0)) }} px</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Reproj Error (P95)</td>
+                                        <td>{{ "%.3f"|format(scene.reprojection_error_p95|default(0)) }} px</td>
+                                    </tr>
+                                    <tr>
+                                        <td>High-Quality Points</td>
+                                        <td>{{ "%.1f"|format(scene.high_quality_points_pct|default(0)) }}%</td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            <div class="detail-section">
+                                <h4>{{ scene.scene_name }} - Efficiency Metrics</h4>
+                                <table class="detail-table">
+                                    <tr>
+                                        <td>Points per Image</td>
+                                        <td>{{ "%.1f"|format(scene.points_per_image|default(0)) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Observations per Image</td>
+                                        <td>{{ "%.1f"|format(scene.observations_per_image|default(0)) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Processing Time</td>
+                                        <td>{{ "%.2f"|format(scene.execution_time|default(0)) }} s</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Time per Image</td>
+                                        <td>{{ "%.1f"|format((scene.execution_time|default(0) / scene.num_images * 1000) if scene.num_images > 0 else 0) }} ms</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Number of Cameras</td>
+                                        <td>{{ scene.num_cameras|default(0) }}</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <script>
+                    function toggleDetails() {
+                        const content = document.getElementById('detailContent');
+                        const header = document.querySelector('.detail-accordion-header');
+                        content.classList.toggle('active');
+                        header.classList.toggle('active');
+                    }
+                </script>
+            </section>
+
+            <!-- Cross-Scene Comparisons -->
+            <section id="comparisons" class="section">
+                <h2>📈 Cross-Scene Comparisons</h2>
+
+                <h3>Scene Comparison</h3>
+                <div class="viz-container">
+                    <div class="viz-content">
+                        {{ comparison_charts.scene_comparison|safe }}
+                    </div>
+                </div>
+
+                <h3>Images vs Points Correlation</h3>
+                <div class="viz-container">
+                    <div class="viz-content">
+                        {{ comparison_charts.images_vs_points|safe }}
+                    </div>
+                </div>
+
+                <h3>Quality Metrics Comparison</h3>
+                <div class="viz-container">
+                    <div class="viz-content">
+                        {{ comparison_charts.quality_metrics|safe }}
+                    </div>
+                </div>
+            </section>
+
+            <!-- Individual Scene Sections -->
+            {% for scene in scene_names %}
+            <section id="{{ scene|lower }}" class="section">
+                <h2>🏛️ {{ scene }} Scene Reconstruction</h2>
+
+                <h3 id="{{ scene|lower }}-point-cloud">3D Point Cloud</h3>
+                <div class="visualization-grid">
+                    <div class="viz-container">
+                        <h4>Interactive 3D Point Cloud</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].point_cloud_3d|safe }}
+                        </div>
+                    </div>
+                </div>
+
+                <h3 id="{{ scene|lower }}-density">Point Density Analysis</h3>
+                <div class="visualization-grid">
+                    <div class="viz-container">
+                        <h4>Spatial Density Heatmap</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].point_density|safe }}
+                        </div>
+                    </div>
+                </div>
+
+                <h3 id="{{ scene|lower }}-quality">Quality Metrics</h3>
+                <div class="visualization-grid">
+                    <div class="viz-container">
+                        <h4>Track Length Distribution</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].track_length_hist|safe }}
+                        </div>
+                    </div>
+                    <div class="viz-container">
+                        <h4>Reprojection Error Distribution</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].reprojection_error_hist|safe }}
+                        </div>
+                    </div>
+                </div>
+
+                <h3 id="{{ scene|lower }}-cameras">Camera Trajectory</h3>
+                <div class="visualization-grid">
+                    <div class="viz-container">
+                        <h4>3D Camera Path</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].camera_trajectory_3d|safe }}
+                        </div>
+                    </div>
+                    <div class="viz-container">
+                        <h4>Top-Down Camera Map</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].camera_topdown|safe }}
+                        </div>
+                    </div>
+                    <div class="viz-container">
+                        <h4>Camera Distribution</h4>
+                        <div class="viz-content">
+                            {{ scene_visualizations[scene].camera_distribution|safe }}
+                        </div>
+                    </div>
+                </div>
+            </section>
+            {% endfor %}
+        </main>
+    </div>
+
+    <footer class="footer">
+        <p>Generated by sfm_experiments | COLMAP Structure-from-Motion Pipeline</p>
+        <p>LaMAR Dataset - ETH Zurich</p>
+    </footer>
+</body>
+</html>

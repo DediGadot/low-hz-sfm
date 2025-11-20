@@ -1,0 +1,113 @@
+# Hilti SLAM Challenge 2023 Dataset Configuration
+#
+# Dataset Information:
+# - Source: https://hilti-challenge.com/dataset-2023.html
+# - Total Size: ~350 GB (all sequences)
+# - Recommended for multi-visit: Site 1 handheld sequences (107.2 GB)
+#
+# Download Instructions:
+#   bash scripts/download_hilti_dataset.sh
+#   OR
+#   uv run python scripts/download_hilti_dataset.py
+
+dataset:
+  name: "hilti"
+  site: 1
+  base_path: "datasets/hilti"
+
+  # Data paths
+  rosbags_dir: "datasets/hilti/rosbags"
+  frames_dir: "datasets/hilti/frames"
+  ground_truth_dir: "datasets/hilti/ground_truth"
+
+  # Camera topic in ROS bag
+  # Hilti dataset uses Alphasense sensor suite with 5 cameras:
+  #   /alphasense/cam0/image_raw - Front camera (recommended for SfM)
+  #   /alphasense/cam1/image_raw - Right camera
+  #   /alphasense/cam2/image_raw - Back camera
+  #   /alphasense/cam3/image_raw - Left camera
+  #   /alphasense/cam4/image_raw - Top camera
+  camera_topic: "/alphasense/cam0/image_raw"
+
+  # Camera calibration (Alphasense cam0)
+  # Based on 720x540px resolution, ~85° HFOV
+  camera_calibration:
+    model: "SIMPLE_RADIAL"  # fx, cx, cy, k1
+    width: 720
+    height: 540
+    params:
+      fx: 400.0      # Focal length (pixels) - from 85° HFOV calculation
+      cx: 360.0      # Principal point x (image center)
+      cy: 270.0      # Principal point y (image center)
+      k1: 0.0        # Radial distortion (will be refined by COLMAP)
+    prior_weight: 10.0  # How strongly to enforce this prior (higher = stricter)
+
+  # Frame extraction
+  target_fps: 0.25  # 1 frame every 4 seconds
+  jpeg_quality: 95
+
+  # Sessions/sequences for multi-visit experiments
+  # These should match the extracted frame directory names
+  # Example mapping for Site 1 handheld (recommended):
+  #   sequence_01 -> site1_handheld_1.bag (Floor 0, 22.0 GB)
+  #   sequence_02 -> site1_handheld_2.bag (Floor 1, 17.9 GB)
+  #   sequence_03 -> site1_handheld_3.bag (Floor 2, 18.3 GB)
+  #   sequence_04 -> site1_handheld_4.bag (Underground, 31.9 GB)
+  #   sequence_05 -> site1_handheld_5.bag (Stairs, 17.1 GB)
+  sessions:
+    - "sequence_01"
+    - "sequence_02"
+    - "sequence_03"
+
+# Experiment configuration
+experiment:
+  visit_counts: [1, 2, 3]  # Number of visits to test
+  output_base: "results"
+
+# SfM Mapper configuration
+mapper:
+  # Mapper type: "colmap" (incremental) or "glomap" (global)
+  # Default: "colmap" for robustness
+  # Use "glomap" for 10-100x speedup on large datasets
+  type: "colmap"
+
+  # COLMAP-specific options (used when mapper.type = "colmap")
+  colmap:
+    camera_model: "SIMPLE_RADIAL"
+    max_num_features: 8192
+    # ULTRA-AGGRESSIVE parameters (calibrated for Hilti dataset with avg 7.9 matches/pair)
+    init_min_num_inliers: 6
+    abs_pose_min_num_inliers: 5
+    abs_pose_min_inlier_ratio: 0.05
+
+  # GLOMAP-specific options (used when mapper.type = "glomap")
+  glomap:
+    max_epipolar_error: 2.0  # Increase for blurry/high-res images (e.g., 4.0, 10.0)
+    max_num_tracks: null      # Cap points for speed (e.g., 1000), null = no limit
+    skip_retriangulation: false  # true = faster but less accurate
+
+# Dataset file mapping (for reference)
+# Actual ROS bag filenames from Hilti SLAM Challenge 2023:
+#
+# Site 1 - Handheld (Multi-visit sequences - RECOMMENDED)
+#   - site1_handheld_1.bag (22.0 GB) - Floor 0
+#   - site1_handheld_2.bag (17.9 GB) - Floor 1
+#   - site1_handheld_3.bag (18.3 GB) - Floor 2
+#   - site1_handheld_4.bag (31.9 GB) - Underground
+#   - site1_handheld_5.bag (17.1 GB) - Stairs
+#
+# Site 2 - Robot
+#   - site2_robot_1.bag (63.3 GB) - Parking (3 floors)
+#   - site2_robot_2.bag (27.7 GB) - Floor 1 Large room
+#   - site2_robot_3.bag (32.5 GB) - Floor 2 Large room
+#
+# Site 2 - Handheld
+#   - site2_handheld_4.bag (9.3 GB) - Central staircase
+#   - site2_handheld_5.bag (20.6 GB) - Vault Staircase
+#   - site2_handheld_6.bag (13.8 GB) - Large room connector
+#
+# Site 3 - Handheld
+#   - site3_handheld_1.bag (9.7 GB) - Underground 1
+#   - site3_handheld_2.bag (14.6 GB) - Underground 2
+#   - site3_handheld_3.bag (18.7 GB) - Underground 3
+#   - site3_handheld_4.bag (10.6 GB) - Underground 4

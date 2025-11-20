@@ -1,0 +1,180 @@
+# LaMAR Dataset Configuration
+# LaMAR: Localization and Mapping for Augmented Reality
+# Source: https://cvg-data.inf.ethz.ch/lamar/
+# GitHub: https://github.com/microsoft/lamar-benchmark
+# License: CC BY-SA 4.0
+
+dataset:
+  name: lamar
+  type: colmap  # Dataset comes with pre-built COLMAP reconstructions
+
+  # Dataset paths (relative to project root)
+  base_dir: datasets/lamar
+
+  # Available scenes: CAB, HGE, LIN
+  scenes:
+    - CAB
+    - HGE
+    - LIN
+
+  # Default scene to use
+  default_scene: CAB
+
+  # Data directories (will be created after extraction)
+  benchmark_dir: ${dataset.base_dir}/benchmark
+  colmap_dir: ${dataset.base_dir}/colmap
+  raw_dir: ${dataset.base_dir}/raw
+
+  # Pre-built COLMAP reconstruction paths per scene
+  colmap_models:
+    CAB: ${dataset.colmap_dir}/CAB
+    HGE: ${dataset.colmap_dir}/HGE
+    LIN: ${dataset.colmap_dir}/LIN
+
+  # Benchmark query images per scene
+  benchmark_queries:
+    CAB: ${dataset.benchmark_dir}/CAB
+    HGE: ${dataset.benchmark_dir}/HGE
+    LIN: ${dataset.benchmark_dir}/LIN
+
+# Camera configuration
+# Note: LaMAR uses multiple camera types (HoloLens, iPhone, NavVis)
+# Camera parameters are stored in the COLMAP models
+camera:
+  # These will be loaded from COLMAP database
+  # Different cameras used for different sessions
+  model: PINHOLE  # Default, actual models in COLMAP data
+
+  # HoloLens 2 approximate specs (for reference)
+  hololens:
+    resolution: [640, 480]
+    fov_horizontal: 64.69  # degrees
+    fov_vertical: 40.41    # degrees
+
+  # iPhone approximate specs (for reference)
+  iphone:
+    resolution: [1920, 1440]
+    fov_horizontal: 68.0   # degrees (approximate)
+
+# Mapper configuration
+mapper:
+  type: colmap  # Use COLMAP for consistency with pre-built models
+
+  # COLMAP configuration
+  colmap:
+    # Use pre-built models by default
+    use_prebuilt: true
+
+    # Frame rate control for reconstruction from raw images
+    # Target FPS for image sampling (null = use all images)
+    # Example: 0.25 = 1 frame every 4 seconds
+    # This matches Hilti dataset extraction approach
+    target_fps: null  # Set to a value like 0.25 to sample images
+
+    # If rebuilding from scratch
+    feature_extraction:
+      camera_model: PINHOLE
+      max_num_features: 8192
+      gpu_index: -1  # -1 for CPU, 0+ for GPU
+
+    matching:
+      exhaustive: false
+      vocab_tree_path: null  # Can use vocab tree for large scenes
+      sequential: true
+      sequential_overlap: 20
+      loop_detection: true
+
+    reconstruction:
+      # Standard COLMAP parameters (not ultra-aggressive like Hilti)
+      init_min_num_inliers: 15
+      abs_pose_min_num_inliers: 15
+      abs_pose_min_inlier_ratio: 0.15
+      filter_min_tri_angle: 1.5
+      max_extra_param: 1
+
+# Experiment configuration
+experiment:
+  # For multi-visit experiments using benchmark queries
+  # Each scene can be treated as a separate "visit" or session
+  visit_counts: [1, 2, 3]  # Number of scenes to combine
+
+  # Output directory
+  output_dir: results/lamar
+
+  # Evaluation settings
+  evaluation:
+    # Use pre-built COLMAP models as reference
+    use_colmap_reference: true
+
+    # Metrics to compute
+    metrics:
+      - ate  # Absolute Trajectory Error (if ground truth available)
+      - chamfer_distance
+      - map_completeness
+
+    # Distance threshold for completeness metric (meters)
+    completeness_threshold: 0.1
+
+# Visualization settings
+visualization:
+  # Plot settings
+  plots:
+    dpi: 300
+    figure_size: [12, 4]
+    style: seaborn-v0_8-darkgrid
+
+  # Save settings
+  save_plots: true
+  plot_format: png
+
+# Logging
+logging:
+  level: INFO
+  file: logs/lamar_experiment.log
+  console: true
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}"
+
+# Processing options
+processing:
+  # Number of parallel workers for certain operations
+  num_workers: 4
+
+  # Cache settings
+  use_cache: true
+  cache_dir: ${dataset.base_dir}/.cache
+
+  # GPU settings
+  use_gpu: true
+  gpu_id: 0
+
+# Dataset metadata
+metadata:
+  version: "2.2"
+  release_date: "2023-09-28"
+  scenes_description:
+    CAB: "Indoor office/lab environment"
+    HGE: "Large indoor space"
+    LIN: "Multi-floor indoor environment"
+
+  # Capture devices used
+  devices:
+    - HoloLens 2
+    - iPhone
+    - NavVis M6
+
+  # Data modalities available
+  modalities:
+    benchmark:
+      - RGB images
+      - Camera poses (query)
+    colmap:
+      - COLMAP sparse reconstruction
+      - Camera poses
+      - Intrinsic parameters
+      - 3D point cloud
+    raw:
+      - RGB images
+      - Depth maps (HoloLens)
+      - IMU data
+      - GPS data (limited)
+      - Laser scans (NavVis)

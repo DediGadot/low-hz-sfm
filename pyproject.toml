@@ -1,0 +1,41 @@
+[project]
+name = "sfm-experiments"
+version = "0.1.0"
+description = "SfM Multi-Visit Experimentation Pipeline - MVP for investigating map accuracy improvement with multiple visits"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Core SfM
+    "pycolmap>=0.6.0",
+    "open3d>=0.18.0",
+
+    # Computer Vision
+    "opencv-python>=4.9.0",
+    "numpy>=1.26.0",
+
+    # ROS bag handling (pure Python, no system ROS required)
+    "rosbags>=0.9.0",
+
+    # Scientific computing
+    "scipy>=1.11.0",
+
+    # CLI & Config
+    "typer>=0.9.0",
+    "pyyaml>=6.0",
+    "loguru>=0.7.0",
+
+    # Visualization
+    "matplotlib>=3.8.0",
+    "plotly>=5.18.0",
+    "pandas>=2.1.0",
+    "seaborn>=0.13.0",
+    "jinja2>=3.1.0",
+
+    # Progress & Downloads
+    "tqdm>=4.66.0",
+    "requests>=2.31.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
