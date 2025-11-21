@@ -15,10 +15,52 @@ Expected Output: Dict with validated configuration parameters
 """
 
 from pathlib import Path
+import os
+import re
 from typing import Any, Dict, List, Optional
 import yaml
 
 from loguru import logger
+
+_PLACEHOLDER_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+
+def _get_nested_value(data: Dict[str, Any], path: str) -> Optional[Any]:
+    """Resolve dot-separated paths inside a nested dict."""
+    current: Any = data
+    for part in path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            return None
+    return current
+
+
+def _resolve_placeholders(value: Any, root: Dict[str, Any]) -> Any:
+    """Recursively substitute ${...} placeholders from config or env vars."""
+    if isinstance(value, dict):
+        return {k: _resolve_placeholders(v, root) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_placeholders(v, root) for v in value]
+    if isinstance(value, str):
+        def _replace(match: re.Match) -> str:
+            key = match.group(1)
+            env_val = os.environ.get(key)
+            if env_val is not None:
+                return env_val
+
+            nested_val = _get_nested_value(root, key)
+            return str(nested_val) if nested_val is not None else match.group(0)
+
+        # Apply repeatedly in case placeholders themselves contain placeholders
+        new_value = value
+        for _ in range(3):  # Prevent runaway recursion
+            updated = _PLACEHOLDER_PATTERN.sub(_replace, new_value)
+            if updated == new_value:
+                break
+            new_value = updated
+        return new_value
+    return value
 
 
 class Config:
@@ -82,6 +124,8 @@ def load_config(config_path: Path) -> Config:
 
     if data is None:
         raise ValueError(f"Empty configuration file: {config_path}")
+
+    data = _resolve_placeholders(data, data)
 
     config = Config(data)
     logger.info(f"Configuration loaded successfully")

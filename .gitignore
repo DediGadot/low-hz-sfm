@@ -1,0 +1,168 @@
+# ============================================================================
+# Python-generated files
+# ============================================================================
+__pycache__/
+*.py[co]
+*.pyo
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# ============================================================================
+# Large Data Directories (65GB+)
+# ============================================================================
+# Downloaded datasets - can be re-downloaded via scripts/download_*.py
+datasets/
+
+# Experiment results - regenerable via experiments
+results/
+
+# Test output directories
+test_output/
+test_viz_output/
+
+# ============================================================================
+# Temporary Files & Logs
+# ============================================================================
+# Log files
+logs/
+*.log
+
+# Temporary output files
+output.txt
+*_output.txt
+*.txt.bak
+
+# Specific large temporary files
+1
+5hz_output.txt
+
+# ============================================================================
+# Temporary Documentation & Debug Reports
+# ============================================================================
+# These are development/debug artifacts that document temporary investigations
+# Keep only finalized documentation in docs/
+BUG_ANALYSIS_OUTPUT.md
+BUGFIX_PYCOLMAP_API.md
+CHANGELOG_CACHING.md
+DEBUGGING_REPORT.md
+FINAL_IMPLEMENTATION_REPORT.md
+FIXES_VALIDATION_REPORT.md
+GLOMAP_IMPLEMENTATION_SUMMARY.md
+IMPLEMENTATION_COMPLETE.md
+IMPLEMENTATION_SUMMARY.txt
+LAMAR_SFM_IMPLEMENTATION_SUMMARY.md
+PHASE_1_EVIDENCE_REPORT.md
+ULTRA_AGGRESSIVE_FINAL_REPORT.md
+*_VALIDATION*.md
+*_REPORT.md
+*_SUMMARY.txt
+
+# ============================================================================
+# IDE & Editor Files
+# ============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============================================================================
+# OS Files
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# Testing & Coverage
+# ============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ============================================================================
+# Jupyter Notebook
+# ============================================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ============================================================================
+# Environment & Secrets
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ============================================================================
+# Temporary & Cache Files
+# ============================================================================
+*.tmp
+*.bak
+*.swp
+.cache/
+
+# ============================================================================
+# Project-Specific Patterns
+# ============================================================================
+# Experimental scripts that aren't part of core functionality
+analyze_all_visits.py
+analyze_phase1_results.py
+check_colmap_pipeline_api.py
+check_reconstruction_details.py
+check_vocab_tree_support.py
+extract_camera_info.py
+investigate_visit_patterns.py
+test_colmap_options.py
+test_enhanced_report.py
+test_fixes_validation.py
+test_multivisit.py
+test_phase1_fixes.py
+test_ultra_aggressive_fix.py

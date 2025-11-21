@@ -44,6 +44,7 @@ except ImportError:
     )
 
 PAIR_PRIME = 2147483647  # COLMAP pair_id prime constant
+_CUDA_AVAILABLE: Optional[bool] = None
 
 
 def _decode_pair_id(pair_id: int) -> Tuple[int, int]:
@@ -51,6 +52,30 @@ def _decode_pair_id(pair_id: int) -> Tuple[int, int]:
     image_id2 = pair_id % PAIR_PRIME
     image_id1 = (pair_id - image_id2) // PAIR_PRIME
     return int(image_id1), int(image_id2)
+
+
+def _is_cuda_available() -> bool:
+    """Check whether pycolmap reports CUDA support (cached)."""
+    global _CUDA_AVAILABLE
+    if _CUDA_AVAILABLE is not None:
+        return _CUDA_AVAILABLE
+
+    try:
+        has_cuda = getattr(pycolmap, "has_cuda", None)
+        if callable(has_cuda):
+            _CUDA_AVAILABLE = bool(has_cuda())
+        elif isinstance(has_cuda, bool):
+            _CUDA_AVAILABLE = has_cuda
+        else:
+            _CUDA_AVAILABLE = False
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug(f"CUDA availability check failed: {exc}")
+        _CUDA_AVAILABLE = False
+
+    if not _CUDA_AVAILABLE:
+        logger.info("pycolmap CUDA unavailable; forcing CPU execution")
+
+    return _CUDA_AVAILABLE
 
 
 @dataclass
@@ -230,18 +255,60 @@ def run_sfm_reconstruction(
     # Setup paths
     sparse_dir.mkdir(parents=True, exist_ok=True)
 
+    # PERFORMANCE: Enable SQLite WAL mode for faster database access
+    # WAL (Write-Ahead Logging) mode allows concurrent reads during writes
+    # and provides better performance for large databases
+    def enable_database_wal_mode(db_path: Path) -> bool:
+        """Enable WAL mode for faster SQLite database access."""
+        if not db_path.exists():
+            return False
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")  # Balanced safety/performance
+            conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
+            conn.execute("PRAGMA temp_store=MEMORY;")  # Keep temp tables in memory
+            conn.commit()
+            conn.close()
+            logger.info("  ✓ SQLite WAL mode enabled for database performance")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to enable WAL mode: {e}")
+            return False
+
     try:
         # ====================================================================
         # COMMON STEPS (Same for COLMAP and GLOMAP)
         # ====================================================================
+
+        # Enable database optimizations if database already exists
+        if database_path.exists():
+            enable_database_wal_mode(database_path)
+
+        cuda_available = _is_cuda_available()
 
         # Step 1: Feature extraction
         logger.info("Step 1/4: Extracting SIFT features...")
         sift_options = pycolmap.SiftExtractionOptions(
             max_num_features=max_num_features,
         )
+
         extraction_options = pycolmap.FeatureExtractionOptions()
         extraction_options.sift = sift_options
+        extraction_options.num_threads = -1  # Use all available CPU threads
+        # PERFORMANCE: Enable GPU acceleration if available (GPU index 0)
+        # Falls back to CPU automatically if GPU unavailable
+        # NOTE: gpu_index is on FeatureExtractionOptions, NOT SiftExtractionOptions
+        # NOTE: gpu_index must be a string, not an integer
+        use_gpu_for_extraction = cuda_available and (
+            mapper_type == "glomap" or (image_count and image_count > 5000)
+        )
+        extraction_options.gpu_index = "0" if use_gpu_for_extraction else "-1"
+
+        if int(extraction_options.gpu_index) >= 0:
+            logger.info(f"  ✓ GPU acceleration enabled (GPU {extraction_options.gpu_index})")
+        else:
+            logger.info(f"  ✓ Using CPU with {extraction_options.num_threads} threads")
 
         pycolmap.extract_features(
             database_path=str(database_path),
@@ -251,6 +318,9 @@ def run_sfm_reconstruction(
             extraction_options=extraction_options,
         )
 
+        # PERFORMANCE: Enable WAL mode after feature extraction creates database
+        enable_database_wal_mode(database_path)
+
         # Step 2: Feature matching with multi-strategy approach
         logger.info("Step 2/4: Matching features (multi-strategy for loop closure)...")
 
@@ -259,22 +329,61 @@ def run_sfm_reconstruction(
             logger.info(f"  2a. Skipping exhaustive matching for large set ({image_count} images)")
         else:
             logger.info("  2a. Exhaustive matching...")
+            # PERFORMANCE: Configure matching options for speed
+            matching_options = pycolmap.FeatureMatchingOptions()
+            matching_options.max_num_matches = max_num_features  # Limit matches per pair
+            # NOTE: gpu_index must be a string, not an integer
+            use_gpu_for_matching = cuda_available and (
+                mapper_type == "glomap" or (image_count and image_count > 1000)
+            )
+            matching_options.gpu_index = "0" if use_gpu_for_matching else "-1"
+            matching_options.num_threads = -1  # Use all CPU cores
+
             pycolmap.match_exhaustive(
                 database_path=str(database_path),
+                matching_options=matching_options,
             )
 
         # Strategy 2: Sequential matching for temporal sequences
-        overlap = 10 if image_count and image_count > 800 else 20
-        logger.info(f"  2b. Sequential matching (overlap={overlap} for loop closure)...")
+        # PERFORMANCE OPTIMIZATION: Reduced overlap and disabled quadratic for large-scale datasets
+        # For >10K images: overlap=3, linear mode (was: overlap=10, quadratic)
+        # This reduces matching complexity from O(n²) to O(n) within overlap window
+        if image_count and image_count > 10000:
+            overlap = 3  # Minimal overlap for very large datasets
+        elif image_count and image_count > 800:
+            overlap = 5  # Reduced from 10 for better performance
+        else:
+            overlap = 20  # Keep high overlap for small datasets
+
+        logger.info(f"  2b. Sequential matching (overlap={overlap} for {'large' if image_count and image_count > 10000 else 'medium' if image_count and image_count > 800 else 'small'} dataset with {image_count} images)...")
         try:
             pairing_options = pycolmap.SequentialPairingOptions()
             pairing_options.overlap = overlap  # Match each image with N neighbors
-            pairing_options.loop_detection = False  # Disable vocab tree
-            pairing_options.quadratic_overlap = True  # All pairs within overlap window
+            # PERFORMANCE: Enable vocabulary tree for loop closure when available
+            pairing_options.loop_detection = False  # TODO: Enable with vocab tree path
+            # CRITICAL OPTIMIZATION: Disable quadratic overlap for large datasets
+            # Linear overlap creates overlap pairs, quadratic creates overlap² pairs
+            pairing_options.quadratic_overlap = False if (image_count and image_count > 5000) else True
+
+            # PERFORMANCE: Configure matching options for sequential matching
+            matching_options = pycolmap.FeatureMatchingOptions()
+            matching_options.max_num_matches = max_num_features
+            # NOTE: gpu_index must be a string, not an integer
+            use_gpu_for_seq_matching = cuda_available and (
+                mapper_type == "glomap" or (image_count and image_count > 5000)
+            )
+            matching_options.gpu_index = "0" if use_gpu_for_seq_matching else "-1"
+            matching_options.num_threads = -1  # Use all available CPU threads
+
+            if int(matching_options.gpu_index) >= 0:
+                logger.info(f"    ✓ GPU matching enabled with overlap={overlap}, quadratic={pairing_options.quadratic_overlap}")
+            else:
+                logger.info(f"    ✓ CPU matching with {matching_options.num_threads} threads, overlap={overlap}, quadratic={pairing_options.quadratic_overlap}")
 
             pycolmap.match_sequential(
                 database_path=str(database_path),
                 pairing_options=pairing_options,
+                matching_options=matching_options,
             )
             logger.info("  ✅ Sequential matching completed successfully")
         except Exception as e:
@@ -357,8 +466,23 @@ def run_sfm_reconstruction(
 
             # Build GLOMAP options
             glomap_opts = GlomapOptions()
+
+            # PERFORMANCE OPTIMIZATIONS for GLOMAP with large-scale datasets
+            if image_count and image_count > 10000:
+                # Aggressive settings for very large datasets (>10K images)
+                glomap_opts.max_epipolar_error = 6.0  # More lenient for speed
+                glomap_opts.max_num_tracks = 500000  # Limit track count for memory
+                glomap_opts.skip_retriangulation = True  # Skip for significant speedup
+                logger.info(f"  ✓ GLOMAP optimizations for large dataset ({image_count} images)")
+            elif image_count and image_count > 5000:
+                # Moderate settings for medium datasets (5-10K images)
+                glomap_opts.max_epipolar_error = 5.0
+                glomap_opts.max_num_tracks = 750000
+                glomap_opts.skip_retriangulation = False
+                logger.info(f"  ✓ GLOMAP optimizations for medium dataset ({image_count} images)")
+
+            # Override with user-provided options if specified
             if glomap_options:
-                # Update with user-provided options
                 if "max_epipolar_error" in glomap_options:
                     glomap_opts.max_epipolar_error = glomap_options["max_epipolar_error"]
                 if "max_num_tracks" in glomap_options:

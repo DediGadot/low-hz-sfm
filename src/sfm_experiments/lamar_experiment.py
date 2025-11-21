@@ -94,9 +94,25 @@ def evaluate_reconstruction(
     """
     metrics = {}
 
+    def _is_registered(img: pycolmap.Image) -> bool:
+        """Safe check for registered flag across pycolmap versions."""
+        flag = getattr(img, "is_registered", None)
+        if callable(flag):
+            try:
+                return bool(flag())
+            except Exception:
+                return False
+        return bool(getattr(img, "registered", flag if flag is not None else False))
+
+    def _registered_image_count(recon: pycolmap.Reconstruction) -> int:
+        """Count only registered images to avoid overstating success."""
+        return sum(
+            1 for img in recon.images.values() if _is_registered(img)
+        )
+
     # 1. Registration ratio (% images registered)
-    num_images_recon = len(reconstruction.images)
-    num_images_gt = len(ground_truth.images)
+    num_images_recon = _registered_image_count(reconstruction)
+    num_images_gt = _registered_image_count(ground_truth)
     registration_ratio = num_images_recon / num_images_gt if num_images_gt > 0 else 0.0
     metrics['registration_ratio'] = registration_ratio
     logger.info(f"Registration: {num_images_recon}/{num_images_gt} images ({registration_ratio*100:.1f}%)")
@@ -114,11 +130,13 @@ def evaluate_reconstruction(
         estimated_poses = {}
         ground_truth_poses = {}
 
-        for img_id, img in reconstruction.images.items():
-            estimated_poses[img.name] = (img.qvec, img.tvec)
+        for img in reconstruction.images.values():
+            if _is_registered(img):
+                estimated_poses[img.name] = (img.qvec, img.tvec)
 
-        for img_id, img in ground_truth.images.items():
-            ground_truth_poses[img.name] = (img.qvec, img.tvec)
+        for img in ground_truth.images.values():
+            if _is_registered(img):
+                ground_truth_poses[img.name] = (img.qvec, img.tvec)
 
         # Compute ATE for common images
         ate = compute_ate(estimated_poses, ground_truth_poses)
@@ -444,18 +462,32 @@ def reconstruct_lamar_scene(
             logger.info(f"Loading cached {mapper_type} reconstruction from {sparse_path}")
             try:
                 reconstruction = pycolmap.Reconstruction(str(sparse_path))
+                num_registered = (
+                    reconstruction.num_reg_images()
+                    if hasattr(reconstruction, "num_reg_images")
+                    else len(reconstruction.images)
+                )
+                num_points = (
+                    reconstruction.num_points3D()
+                    if hasattr(reconstruction, "num_points3D")
+                    else len(reconstruction.points3D)
+                )
                 result = ReconstructionResult(
                     success=True,
-                    num_registered_images=len(reconstruction.images),
-                    num_3d_points=len(reconstruction.points3D),
-                    mean_reprojection_error=0.0,  # Not computed for cache
+                    num_registered_images=num_registered,
+                    num_3d_points=num_points,
+                    mean_reprojection_error=reconstruction.compute_mean_reprojection_error()
+                    if hasattr(reconstruction, "compute_mean_reprojection_error")
+                    else 0.0,
                     execution_time=0.0,
                     sparse_path=sparse_path,
                     mapper_type=mapper_type,
                     reconstruction=reconstruction,
                 )
-                logger.info(f"✅ Loaded cached reconstruction: {result.num_registered_images} images, "
-                           f"{result.num_3d_points} points")
+                logger.info(
+                    f"✅ Loaded cached reconstruction: {result.num_registered_images} images, "
+                    f"{result.num_3d_points} points"
+                )
                 return result
             except Exception as e:
                 logger.warning(f"Failed to load cached reconstruction: {e}, running fresh reconstruction")

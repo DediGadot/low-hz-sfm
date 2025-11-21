@@ -104,16 +104,20 @@ def extract_frames_from_rosbag(
 
         logger.info(f"Found camera topic: {camera_topic}")
 
-        # Count total messages for progress bar
-        total_messages = sum(
-            1
-            for connection, timestamp, rawdata in reader.messages(
-                connections=camera_connections
-            )
-        )
+        # Try to estimate message count without a second pass; fall back to indeterminate progress
+        total_messages = None
+        try:  # pragma: no cover - best effort, depends on rosbags internals
+            counts = [
+                getattr(conn, "count")
+                for conn in camera_connections
+                if hasattr(conn, "count") and isinstance(getattr(conn, "count"), int)
+            ]
+            if counts:
+                total_messages = sum(counts)
+        except Exception:
+            total_messages = None
 
-        # Reset reader and extract frames
-        with tqdm(total=total_messages, desc="Processing frames") as pbar:
+        with tqdm(total=total_messages, desc="Processing frames", unit="msg") as pbar:
             for connection, timestamp, rawdata in reader.messages(
                 connections=camera_connections
             ):
