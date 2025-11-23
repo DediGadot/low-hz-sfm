@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
 import time
+import random
 
 from loguru import logger
 import pycolmap
@@ -93,6 +94,24 @@ def evaluate_reconstruction(
         Dictionary of evaluation metrics
     """
     metrics = {}
+    max_points_for_metrics = 200000
+
+    def _build_downsampled_pcd(points_iter, label: str) -> o3d.geometry.PointCloud:
+        """Reservoir-sample points to a bounded size to avoid OOM and slow metrics."""
+        sampled = []
+        for idx, pt in enumerate(points_iter):
+            xyz = pt.xyz if hasattr(pt, "xyz") else pt
+            if idx < max_points_for_metrics:
+                sampled.append(xyz)
+            else:
+                j = random.randint(0, idx)
+                if j < max_points_for_metrics:
+                    sampled[j] = xyz
+        if not sampled:
+            logger.warning(f"{scene_name}: No points sampled for {label}")
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(np.asarray(sampled))
+        return pcd
 
     def _is_registered(img: pycolmap.Image) -> bool:
         """Safe check for registered flag across pycolmap versions."""
@@ -149,14 +168,11 @@ def evaluate_reconstruction(
     # 4. Chamfer Distance and Completeness (requires point cloud conversion)
     try:
         # Convert COLMAP reconstructions to Open3D point clouds
-        recon_points = np.array([p.xyz for p in reconstruction.points3D.values()])
-        gt_points = np.array([p.xyz for p in ground_truth.points3D.values()])
+        recon_pcd = _build_downsampled_pcd(reconstruction.points3D.values(), "reconstruction")
+        gt_pcd = _build_downsampled_pcd(ground_truth.points3D.values(), "ground truth")
 
-        recon_pcd = o3d.geometry.PointCloud()
-        recon_pcd.points = o3d.utility.Vector3dVector(recon_points)
-
-        gt_pcd = o3d.geometry.PointCloud()
-        gt_pcd.points = o3d.utility.Vector3dVector(gt_points)
+        if len(recon_pcd.points) == 0 or len(gt_pcd.points) == 0:
+            raise ValueError("Point clouds are empty after downsampling; cannot evaluate")
 
         # Align point clouds using ICP
         logger.info("Aligning point clouds with ICP...")

@@ -127,7 +127,7 @@ def load_lamar_metadata(scene_path: Path, device_type: str = "hololens") -> Opti
         return None
 
     try:
-        with open(metadata_file, 'r') as f:
+        with open(metadata_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
         # Extract session information
@@ -375,11 +375,28 @@ def get_image_timestamps(image_paths: List[Path]) -> List[float]:
         if match:
             try:
                 ts_value = int(match.group(1))
-                # Treat numeric filenames as microsecond timestamps to preserve
-                # realistic per-frame spacing when sampling by time.
-                timestamp = ts_value / 1_000_000.0
-            except (ValueError, OverflowError):
+                # BUGFIX: More accurate timestamp unit detection based on realistic ranges
+                # Current Unix timestamp (year 2024) is ~1.7e9 seconds
+                # Nanoseconds: ~1.7e18, Microseconds: ~1.7e15, Milliseconds: ~1.7e12
+                if ts_value > 1e17:  # Likely nanoseconds (Unix epoch * 1e9)
+                    timestamp = ts_value / 1e9
+                elif ts_value > 1e14:  # Likely microseconds (Unix epoch * 1e6)
+                    timestamp = ts_value / 1e6
+                elif ts_value > 1e11:  # Likely milliseconds (Unix epoch * 1e3)
+                    timestamp = ts_value / 1e3
+                elif 1e9 < ts_value < 2e9:  # Unix epoch seconds (1970-2033)
+                    timestamp = float(ts_value)
+                else:
+                    # Small values - likely frame index or relative time in seconds
+                    timestamp = float(ts_value)
+            except (ValueError, TypeError):
                 timestamp = None
+
+            # BUGFIX: Check for inf/nan after conversion
+            if timestamp is not None:
+                import math
+                if math.isinf(timestamp) or math.isnan(timestamp):
+                    timestamp = None
 
         # Strategy 2: Extract from session directory name when filenames lack usable time info
         if timestamp is None:
@@ -409,10 +426,14 @@ def get_image_timestamps(image_paths: List[Path]) -> List[float]:
 
         timestamps.append(timestamp)
 
+    # BUGFIX: Better heuristic for detecting Unix epoch timestamps
     # Normalize timestamps to start from 0 if using session-based timestamps
-    if timestamps and timestamps[0] > 1000:  # Likely real timestamps
-        min_timestamp = min(timestamps)
-        timestamps = [t - min_timestamp for t in timestamps]
+    if timestamps:
+        avg_timestamp = sum(timestamps) / len(timestamps)
+        # Unix timestamps are typically > 1e9 (year 2001+)
+        if avg_timestamp > 1e9:
+            min_timestamp = min(timestamps)
+            timestamps = [t - min_timestamp for t in timestamps]
 
     return timestamps
 
@@ -454,6 +475,10 @@ def sample_images_by_fps(
             f"Mismatch: {len(image_paths)} images but {len(timestamps)} timestamps"
         )
 
+    # BUGFIX: Validate target_fps to prevent division by zero
+    if target_fps <= 0:
+        raise ValueError(f"target_fps must be positive, got {target_fps}")
+
     # Calculate sample interval
     sample_interval = 1.0 / target_fps
 
@@ -491,6 +516,25 @@ def sample_images_by_fps(
     return sampled_images
 
 
+def _get_lamar_session_directories(images_path: Path) -> List[Path]:
+    """
+    Get all valid LaMAR session directories with consistent filtering.
+
+    BUGFIX: Unified function to prevent inconsistent session discovery across codebase.
+
+    Args:
+        images_path: Path to LaMAR images directory
+
+    Returns:
+        Sorted list of session directory paths
+    """
+    session_prefixes = ["hl_", "phone_", "navvis_", "ios_"]
+    session_dirs = []
+    for prefix in session_prefixes:
+        session_dirs.extend(images_path.glob(f"{prefix}*"))
+    return sorted([d for d in session_dirs if d.is_dir()])
+
+
 def sample_lamar_images_by_session(
     images_path: Path,
     target_fps: float,
@@ -518,10 +562,14 @@ def sample_lamar_images_by_session(
         logger.error(f"Images path does not exist: {images_path}")
         return []
 
+    # BUGFIX: Validate target_fps to prevent division by zero
+    if target_fps <= 0:
+        raise ValueError(f"target_fps must be positive, got {target_fps}")
+
     all_sampled_images = []
 
-    # Find all session directories (handle all device prefixes: hl_, phone_, navvis_, ios_, etc.)
-    session_dirs = sorted([d for d in images_path.iterdir() if d.is_dir()])
+    # BUGFIX: Use unified session discovery function for consistency
+    session_dirs = _get_lamar_session_directories(images_path)
 
     if not session_dirs:
         logger.warning(f"No session directories found in {images_path}")
@@ -612,8 +660,8 @@ def validate_lamar_dataset(base_dir: Path, scene_name: str) -> Tuple[bool, List[
     if not images_path.exists():
         issues.append(f"Images directory not found: {images_path}")
     else:
-        # Verify it contains at least one session
-        session_dirs = list(images_path.glob("hl_*"))
+        # BUGFIX: Use unified session discovery function for consistency
+        session_dirs = _get_lamar_session_directories(images_path)
         if not session_dirs:
             issues.append(f"No session directories found in {images_path}")
 

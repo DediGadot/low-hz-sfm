@@ -24,6 +24,16 @@ from loguru import logger
 
 _PLACEHOLDER_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
+# BUGFIX: Whitelist of allowed environment variables to prevent information disclosure
+# Only allow specific, safe environment variables that are project-related
+ALLOWED_ENV_VARS = {
+    # System variables (safe)
+    'HOME', 'USER', 'PATH', 'TEMP', 'TMP', 'TMPDIR',
+    # Project-specific variables (add your custom ones here)
+    'LAMAR_BASE_DIR', 'HILTI_BASE_DIR', 'SFM_DATA_DIR',
+    'SFM_OUTPUT_DIR', 'SFM_CACHE_DIR',
+}
+
 
 def _get_nested_value(data: Dict[str, Any], path: str) -> Optional[Any]:
     """Resolve dot-separated paths inside a nested dict."""
@@ -45,20 +55,42 @@ def _resolve_placeholders(value: Any, root: Dict[str, Any]) -> Any:
     if isinstance(value, str):
         def _replace(match: re.Match) -> str:
             key = match.group(1)
-            env_val = os.environ.get(key)
-            if env_val is not None:
-                return env_val
 
+            # BUGFIX: Only allow whitelisted environment variables (security)
+            # This prevents information disclosure of sensitive env vars like API keys
+            if key in ALLOWED_ENV_VARS:
+                env_val = os.environ.get(key)
+                if env_val is not None:
+                    return env_val
+
+            # Fall back to config-internal lookups
             nested_val = _get_nested_value(root, key)
-            return str(nested_val) if nested_val is not None else match.group(0)
+            if nested_val is not None:
+                return str(nested_val)
 
-        # Apply repeatedly in case placeholders themselves contain placeholders
+            # Key not found - leave placeholder as-is for visibility
+            return match.group(0)
+
+        # BUGFIX: Apply repeatedly with cycle detection
         new_value = value
-        for _ in range(3):  # Prevent runaway recursion
+        seen_values = {value}  # Track values to detect cycles
+        max_iterations = 10  # Safety limit
+
+        for iteration in range(max_iterations):
             updated = _PLACEHOLDER_PATTERN.sub(_replace, new_value)
             if updated == new_value:
+                # No more substitutions possible - done
                 break
+            if updated in seen_values:
+                # Cycle detected!
+                raise ValueError(
+                    f"Circular reference detected in config placeholders. "
+                    f"Value '{value}' creates a cycle after {iteration + 1} iterations. "
+                    f"Check for circular dependencies in your configuration."
+                )
+            seen_values.add(updated)
             new_value = updated
+
         return new_value
     return value
 
@@ -240,6 +272,32 @@ def get_default_colmap_config() -> Dict[str, Any]:
     }
 
 
+def get_default_visualization_config() -> Dict[str, Any]:
+    """
+    Get default visualization configuration.
+
+    Returns:
+        Default visualization configuration dictionary
+
+    Example:
+        >>> viz_config = get_default_visualization_config()
+        >>> print(viz_config['visualization']['enabled'])  # False
+        >>> print(viz_config['visualization']['num_samples'])  # 10
+    """
+    return {
+        "visualization": {
+            "enabled": False,  # Disabled by default (no overhead)
+            "num_samples": 10,  # Number of frames to visualize per pipeline stage
+            "max_matches_display": 200,  # Maximum matches to show in match visualizations
+            "image_scale": 0.5,  # Scale factor for images (0.5 = 50% size)
+            "max_points_display": 10000,  # Maximum 3D points in trajectory visualization
+            "enable_features": True,  # Generate feature extraction visualizations
+            "enable_matching": True,  # Generate feature matching visualizations
+            "enable_reconstruction": True,  # Generate reconstruction visualizations
+        }
+    }
+
+
 # Validation
 if __name__ == "__main__":
     """
@@ -343,11 +401,18 @@ if __name__ == "__main__":
     try:
         hilti_config = get_default_hilti_config()
         colmap_config = get_default_colmap_config()
+        viz_config = get_default_visualization_config()
 
         if "dataset" not in hilti_config:
             all_validation_failures.append("Default config: Hilti config missing 'dataset' key")
         if "colmap" not in colmap_config:
             all_validation_failures.append("Default config: COLMAP config missing 'colmap' key")
+        if "visualization" not in viz_config:
+            all_validation_failures.append("Default config: Visualization config missing 'visualization' key")
+        elif viz_config["visualization"]["num_samples"] != 10:
+            all_validation_failures.append(
+                f"Default config: Visualization num_samples should be 10, got {viz_config['visualization']['num_samples']}"
+            )
     except Exception as e:
         all_validation_failures.append(f"Default config: Exception raised: {e}")
 

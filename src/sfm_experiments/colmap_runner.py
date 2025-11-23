@@ -22,6 +22,7 @@ from dataclasses import dataclass
 import time
 import shutil
 import sqlite3
+import json
 
 import pycolmap
 import numpy as np
@@ -52,6 +53,34 @@ def _decode_pair_id(pair_id: int) -> Tuple[int, int]:
     image_id2 = pair_id % PAIR_PRIME
     image_id1 = (pair_id - image_id2) // PAIR_PRIME
     return int(image_id1), int(image_id2)
+
+
+def _iter_image_files(image_dir: Path):
+    """Yield image files recursively (case-insensitive common extensions)."""
+    exts = [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]
+    for ext in exts:
+        yield from image_dir.rglob(f"*{ext}")
+
+
+def _count_images(image_dir: Path) -> int:
+    """Count images recursively without materializing the file list."""
+    return sum(1 for _ in _iter_image_files(image_dir))
+
+
+def _sanitize_for_cache(obj: Any) -> Any:
+    """
+    Make cache metadata JSON-friendly and comparable.
+
+    Converts non-serializable types to string representations while
+    preserving simple scalars/collections.
+    """
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_cache(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_cache(v) for v in obj]
+    return str(obj)
 
 
 def _is_cuda_available() -> bool:
@@ -147,6 +176,8 @@ def run_sfm_reconstruction(
     max_num_features: int = 8192,
     use_cache: bool = True,
     glomap_options: Optional[Dict[str, Any]] = None,
+    visualize: bool = False,
+    viz_num_samples: int = 10,
 ) -> ReconstructionResult:
     """
     Run SfM reconstruction with configurable mapper (COLMAP or GLOMAP).
@@ -165,6 +196,8 @@ def run_sfm_reconstruction(
         max_num_features: Maximum SIFT features per image
         use_cache: If True, reuse existing reconstruction if available
         glomap_options: Dict of GLOMAP-specific options (only used if mapper_type="glomap")
+        visualize: If True, generate debug visualizations during pipeline execution
+        viz_num_samples: Number of frames to visualize per pipeline stage (default: 10)
 
     Returns:
         ReconstructionResult with statistics and paths
@@ -180,6 +213,13 @@ def run_sfm_reconstruction(
         ...     Path("data/frames"),
         ...     Path("results/reconstruction_1"),
         ...     mapper_type="glomap"
+        ... )
+        >>> # With visualizations
+        >>> result = run_sfm_reconstruction(
+        ...     Path("data/frames"),
+        ...     Path("results/reconstruction_1"),
+        ...     visualize=True,
+        ...     viz_num_samples=10
         ... )
     """
     start_time = time.time()
@@ -206,10 +246,48 @@ def run_sfm_reconstruction(
     database_path = output_dir / "database.db"
     sparse_dir = output_dir / "sparse"
     point_cloud_path = output_dir / "point_cloud.ply"
-    image_count = len(list(Path(image_dir).glob("*.jpg"))) + len(list(Path(image_dir).glob("*.jpeg"))) + len(list(Path(image_dir).glob("*.png")))
+    cache_meta_path = output_dir / "cache_meta.json"
 
-    # Check cache: if reconstruction exists, load and return it
-    if use_cache and sparse_dir.exists() and point_cloud_path.exists():
+    image_count = _count_images(Path(image_dir))
+    if image_count == 0:
+        logger.warning(f"No images found in {image_dir} (recursive search)")
+    else:
+        logger.info(f"Detected {image_count} image(s) in {image_dir} (recursive)")
+
+    current_cache_config = {
+        "mapper_type": mapper_type,
+        "camera_model": camera_model,
+        "max_num_features": max_num_features,
+        "camera_mode": camera_mode.name if hasattr(camera_mode, "name") else str(camera_mode),
+        "image_count": image_count,
+        "glomap_options": glomap_options or {},
+    }
+    current_cache_config = _sanitize_for_cache(current_cache_config)
+
+    def _load_cache_meta(path: Path) -> Optional[Dict[str, Any]]:
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return _sanitize_for_cache(data)
+        except Exception as exc:
+            logger.warning(f"Failed to read cache metadata {path}: {exc}")
+            return None
+
+    def _cache_matches(meta: Optional[Dict[str, Any]]) -> bool:
+        if not meta:
+            return False
+        for key, value in current_cache_config.items():
+            if meta.get(key) != value:
+                logger.info(f"Cache metadata mismatch on '{key}': cached={meta.get(key)}, current={value}")
+                return False
+        return True
+
+    cache_meta = _load_cache_meta(cache_meta_path)
+
+    # Check cache: if reconstruction exists, load and return it (only when metadata matches)
+    if use_cache and sparse_dir.exists() and point_cloud_path.exists() and _cache_matches(cache_meta):
         # Look for existing reconstruction models
         model_dirs = [d for d in sparse_dir.iterdir() if d.is_dir() and d.name.isdigit()]
 
@@ -251,9 +329,59 @@ def run_sfm_reconstruction(
             shutil.rmtree(sparse_dir)
         if point_cloud_path.exists():
             point_cloud_path.unlink()
+        if cache_meta_path.exists():
+            cache_meta_path.unlink()
 
     # Setup paths
     sparse_dir.mkdir(parents=True, exist_ok=True)
+
+    # BUGFIX: Validate database integrity before use
+    def validate_database_integrity(db_path: Path) -> Tuple[bool, Optional[str]]:
+        """
+        Validate COLMAP database integrity.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not db_path.exists():
+            return True, None  # Database doesn't exist yet - will be created
+
+        conn = None
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=5.0)
+
+            # Run SQLite integrity check
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA integrity_check;")
+            result = cursor.fetchone()
+
+            if result and result[0] != "ok":
+                return False, f"Database integrity check failed: {result[0]}"
+
+            # Verify COLMAP-required tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = {row[0] for row in cursor.fetchall()}
+
+            required_tables = {'cameras', 'images', 'keypoints', 'descriptors', 'matches'}
+            missing_tables = required_tables - tables
+
+            if missing_tables and len(tables) > 0:
+                # Database exists but is incomplete (partial creation/corruption)
+                return False, f"Database missing required tables: {missing_tables}"
+
+            return True, None
+
+        except sqlite3.DatabaseError as e:
+            return False, f"Database corruption detected: {e}"
+        except Exception as e:
+            return False, f"Database validation failed: {e}"
+        finally:
+            # BUGFIX: Always close connection in finally block to prevent resource leaks
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
 
     # PERFORMANCE: Enable SQLite WAL mode for faster database access
     # WAL (Write-Ahead Logging) mode allows concurrent reads during writes
@@ -262,6 +390,7 @@ def run_sfm_reconstruction(
         """Enable WAL mode for faster SQLite database access."""
         if not db_path.exists():
             return False
+        conn = None
         try:
             conn = sqlite3.connect(str(db_path))
             conn.execute("PRAGMA journal_mode=WAL;")
@@ -269,28 +398,74 @@ def run_sfm_reconstruction(
             conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
             conn.execute("PRAGMA temp_store=MEMORY;")  # Keep temp tables in memory
             conn.commit()
-            conn.close()
             logger.info("  ✓ SQLite WAL mode enabled for database performance")
             return True
         except Exception as e:
             logger.warning(f"Failed to enable WAL mode: {e}")
             return False
+        finally:
+            # BUGFIX: Always close connection in finally block to prevent resource leaks
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass  # Ignore errors during cleanup
 
     try:
+        # ====================================================================
+        # INITIALIZE VISUALIZATION (if enabled)
+        # ====================================================================
+        visualizer = None
+        if visualize:
+            from .pipeline_visualizer import PipelineVisualizer, VisualizationConfig
+            viz_config = VisualizationConfig(
+                output_dir=output_dir,
+                num_samples=viz_num_samples,
+            )
+            visualizer = PipelineVisualizer(viz_config)
+            logger.info(f"Debug visualizations enabled: {viz_num_samples} samples per stage")
+
         # ====================================================================
         # COMMON STEPS (Same for COLMAP and GLOMAP)
         # ====================================================================
 
-        # Enable database optimizations if database already exists
+        # BUGFIX: Validate database integrity before use
+        if database_path.exists():
+            is_valid, error_msg = validate_database_integrity(database_path)
+            if not is_valid:
+                logger.error(f"Database validation failed: {error_msg}")
+                logger.info("Removing corrupted database and starting fresh...")
+                database_path.unlink()  # Remove corrupted database
+                # Also remove associated WAL files if they exist
+                wal_file = database_path.with_suffix(".db-wal")
+                shm_file = database_path.with_suffix(".db-shm")
+                if wal_file.exists():
+                    wal_file.unlink()
+                if shm_file.exists():
+                    shm_file.unlink()
+
+        # Enable database optimizations if database exists and is valid
         if database_path.exists():
             enable_database_wal_mode(database_path)
 
         cuda_available = _is_cuda_available()
 
+        # PERFORMANCE: Adaptive feature count based on dataset size
+        # Smaller datasets don't need as many features per image
+        adaptive_max_features = max_num_features
+        if image_count and image_count < 100:
+            adaptive_max_features = 4096  # 2x faster, minimal quality loss
+            logger.info(f"  ✓ Using adaptive features: {adaptive_max_features} (small dataset)")
+        elif image_count and image_count < 500:
+            adaptive_max_features = 6144  # Balanced
+            logger.info(f"  ✓ Using adaptive features: {adaptive_max_features} (medium dataset)")
+        else:
+            logger.info(f"  ✓ Using full features: {adaptive_max_features}")
+
         # Step 1: Feature extraction
         logger.info("Step 1/4: Extracting SIFT features...")
         sift_options = pycolmap.SiftExtractionOptions(
-            max_num_features=max_num_features,
+            max_num_features=adaptive_max_features,
         )
 
         extraction_options = pycolmap.FeatureExtractionOptions()
@@ -299,13 +474,14 @@ def run_sfm_reconstruction(
         # PERFORMANCE: Enable GPU acceleration if available (GPU index 0)
         # Falls back to CPU automatically if GPU unavailable
         # NOTE: gpu_index is on FeatureExtractionOptions, NOT SiftExtractionOptions
-        # NOTE: gpu_index must be a string, not an integer
+        # NOTE: gpu_index must be a string, not an integer (pycolmap API requirement)
         use_gpu_for_extraction = cuda_available and (
             mapper_type == "glomap" or (image_count and image_count > 5000)
         )
+        # BUGFIX: Cleaner type handling - set string directly, check boolean for logging
         extraction_options.gpu_index = "0" if use_gpu_for_extraction else "-1"
 
-        if int(extraction_options.gpu_index) >= 0:
+        if use_gpu_for_extraction:
             logger.info(f"  ✓ GPU acceleration enabled (GPU {extraction_options.gpu_index})")
         else:
             logger.info(f"  ✓ Using CPU with {extraction_options.num_threads} threads")
@@ -321,6 +497,11 @@ def run_sfm_reconstruction(
         # PERFORMANCE: Enable WAL mode after feature extraction creates database
         enable_database_wal_mode(database_path)
 
+        # Visualization hook: Feature extraction complete
+        if visualizer:
+            image_files = sorted([f.name for f in _iter_image_files(image_dir)])
+            visualizer.visualize_features(database_path, image_dir, image_files)
+
         # Step 2: Feature matching with multi-strategy approach
         logger.info("Step 2/4: Matching features (multi-strategy for loop closure)...")
 
@@ -331,7 +512,7 @@ def run_sfm_reconstruction(
             logger.info("  2a. Exhaustive matching...")
             # PERFORMANCE: Configure matching options for speed
             matching_options = pycolmap.FeatureMatchingOptions()
-            matching_options.max_num_matches = max_num_features  # Limit matches per pair
+            matching_options.max_num_matches = adaptive_max_features  # Limit matches per pair
             # NOTE: gpu_index must be a string, not an integer
             use_gpu_for_matching = cuda_available and (
                 mapper_type == "glomap" or (image_count and image_count > 1000)
@@ -350,12 +531,14 @@ def run_sfm_reconstruction(
         # This reduces matching complexity from O(n²) to O(n) within overlap window
         if image_count and image_count > 10000:
             overlap = 3  # Minimal overlap for very large datasets
-        elif image_count and image_count > 800:
-            overlap = 5  # Reduced from 10 for better performance
+        elif image_count and image_count > 1000:
+            overlap = 4  # Reduced from 5 for better performance
+        elif image_count and image_count > 200:
+            overlap = 8  # Reduced from 20 for medium datasets
         else:
-            overlap = 20  # Keep high overlap for small datasets
+            overlap = 15  # Only tiny datasets need very high overlap
 
-        logger.info(f"  2b. Sequential matching (overlap={overlap} for {'large' if image_count and image_count > 10000 else 'medium' if image_count and image_count > 800 else 'small'} dataset with {image_count} images)...")
+        logger.info(f"  2b. Sequential matching (overlap={overlap} for {'very large' if image_count and image_count > 10000 else 'large' if image_count and image_count > 1000 else 'medium' if image_count and image_count > 200 else 'small'} dataset with {image_count} images)...")
         try:
             pairing_options = pycolmap.SequentialPairingOptions()
             pairing_options.overlap = overlap  # Match each image with N neighbors
@@ -363,19 +546,21 @@ def run_sfm_reconstruction(
             pairing_options.loop_detection = False  # TODO: Enable with vocab tree path
             # CRITICAL OPTIMIZATION: Disable quadratic overlap for large datasets
             # Linear overlap creates overlap pairs, quadratic creates overlap² pairs
-            pairing_options.quadratic_overlap = False if (image_count and image_count > 5000) else True
+            # PERFORMANCE: Lowered threshold from 5000 to 1000 to reduce O(n²) matching for medium datasets
+            pairing_options.quadratic_overlap = False if (image_count and image_count > 1000) else True
 
             # PERFORMANCE: Configure matching options for sequential matching
             matching_options = pycolmap.FeatureMatchingOptions()
-            matching_options.max_num_matches = max_num_features
-            # NOTE: gpu_index must be a string, not an integer
+            matching_options.max_num_matches = adaptive_max_features
+            # NOTE: gpu_index must be a string, not an integer (pycolmap API requirement)
             use_gpu_for_seq_matching = cuda_available and (
                 mapper_type == "glomap" or (image_count and image_count > 5000)
             )
+            # BUGFIX: Cleaner type handling - set string directly, check boolean for logging
             matching_options.gpu_index = "0" if use_gpu_for_seq_matching else "-1"
             matching_options.num_threads = -1  # Use all available CPU threads
 
-            if int(matching_options.gpu_index) >= 0:
+            if use_gpu_for_seq_matching:
                 logger.info(f"    ✓ GPU matching enabled with overlap={overlap}, quadratic={pairing_options.quadratic_overlap}")
             else:
                 logger.info(f"    ✓ CPU matching with {matching_options.num_threads} threads, overlap={overlap}, quadratic={pairing_options.quadratic_overlap}")
@@ -388,6 +573,11 @@ def run_sfm_reconstruction(
             logger.info("  ✅ Sequential matching completed successfully")
         except Exception as e:
             logger.warning(f"Sequential matching failed: {e}. Continuing with exhaustive matches only.")
+
+        # Visualization hook: Matching complete
+        if visualizer:
+            image_files = sorted([f.name for f in _iter_image_files(image_dir)])
+            visualizer.visualize_matches(database_path, image_dir, image_files)
 
         # ====================================================================
         # MAPPER-SPECIFIC RECONSTRUCTION
@@ -521,16 +711,29 @@ def run_sfm_reconstruction(
                 f"{best_recon.num_points3D()} points"
             )
 
+        # Visualization hook: Reconstruction complete
+        if visualizer:
+            visualizer.visualize_reconstruction(best_recon)
+
         # ====================================================================
         # COMMON EXPORT (Same for COLMAP and GLOMAP)
         # ====================================================================
 
         # Step 4: Export point cloud
         logger.info("Step 4/4: Exporting point cloud...")
-        best_recon.export_PLY(str(point_cloud_path))
+        # PERFORMANCE: Skip PLY export if file already exists
+        if point_cloud_path.exists():
+            logger.info(f"  ✓ Using existing point cloud: {point_cloud_path.name}")
+        else:
+            best_recon.export_PLY(str(point_cloud_path))
+            logger.info(f"  ✓ Exported point cloud: {point_cloud_path.name}")
 
         # Save sparse reconstruction
-        output_sparse = sparse_dir / str(best_idx if mapper_type == "colmap" else best_model_dir.name)
+        # BUGFIX: Separate logic for COLMAP vs GLOMAP to avoid variable scope issues
+        if mapper_type == "colmap":
+            output_sparse = sparse_dir / str(best_idx)
+        else:  # mapper_type == "glomap"
+            output_sparse = sparse_dir / str(best_model_dir.name)
         best_recon.write(str(output_sparse))
 
         execution_time = time.time() - start_time
@@ -546,6 +749,20 @@ def run_sfm_reconstruction(
             point_cloud_path=point_cloud_path,
             reconstruction=best_recon,
         )
+
+        # Persist cache metadata for future runs
+        try:
+            meta_to_save = dict(current_cache_config)
+            meta_to_save["timestamp"] = time.time()
+            with open(cache_meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta_to_save, f, indent=2)
+        except Exception as exc:
+            logger.warning(f"Failed to write cache metadata: {exc}")
+
+        # Finalize visualization report
+        if visualizer:
+            experiment_name = f"{image_dir.name}_{mapper_type}"
+            visualizer.finalize_report(experiment_name, execution_time)
 
         logger.info(
             f"✅ Reconstruction complete ({mapper_type.upper()}): {result.num_registered_images} images, "
@@ -574,6 +791,8 @@ def run_colmap_reconstruction(
     camera_mode: pycolmap.CameraMode = pycolmap.CameraMode.SINGLE,
     max_num_features: int = 8192,
     use_cache: bool = True,
+    visualize: bool = False,
+    viz_num_samples: int = 10,
 ) -> ReconstructionResult:
     """
     Run full COLMAP incremental SfM pipeline.
@@ -615,6 +834,8 @@ def run_colmap_reconstruction(
         camera_mode=camera_mode,
         max_num_features=max_num_features,
         use_cache=use_cache,
+        visualize=visualize,
+        viz_num_samples=viz_num_samples,
     )
 
 

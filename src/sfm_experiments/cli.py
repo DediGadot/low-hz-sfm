@@ -92,6 +92,12 @@ def run_colmap(
     output_dir: Path = typer.Argument(..., help="Output directory for reconstruction"),
     camera_model: str = typer.Option("SIMPLE_RADIAL", help="COLMAP camera model"),
     max_features: int = typer.Option(8192, help="Maximum SIFT features per image"),
+    visualize: bool = typer.Option(
+        False, "--visualize", help="Generate debug visualizations during pipeline execution"
+    ),
+    viz_samples: int = typer.Option(
+        10, "--viz-samples", help="Number of samples to visualize per pipeline stage"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """
@@ -106,7 +112,17 @@ def run_colmap(
 
     print_section("COLMAP Reconstruction")
 
-    result = run_colmap_reconstruction(image_dir, output_dir, camera_model, max_features)
+    if visualize:
+        rprint(f"[blue]Debug visualizations enabled ({viz_samples} samples per stage)[/blue]")
+
+    result = run_colmap_reconstruction(
+        image_dir,
+        output_dir,
+        camera_model,
+        max_features,
+        visualize=visualize,
+        viz_num_samples=viz_samples
+    )
 
     if result.success:
         print_summary({
@@ -139,6 +155,12 @@ def run_experiment(
     ),
     no_cache: bool = typer.Option(
         False, "--no-cache", help="Disable cache and re-run all steps"
+    ),
+    visualize: bool = typer.Option(
+        False, "--visualize", help="Generate debug visualizations during pipeline execution"
+    ),
+    viz_samples: int = typer.Option(
+        10, "--viz-samples", help="Number of samples to visualize per pipeline stage"
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
@@ -352,6 +374,12 @@ def run_experiment(
             logger.warning(f"Failed to load ground truth point cloud: {exc}")
     else:
         logger.warning("Ground truth point cloud not found - point cloud metrics will be skipped")
+
+    # Add visualization parameters to colmap_kwargs
+    if visualize:
+        colmap_kwargs["visualize"] = True
+        colmap_kwargs["viz_num_samples"] = viz_samples
+        rprint(f"[blue]Debug visualizations enabled ({viz_samples} samples per stage)[/blue]")
 
     # Run multi-visit experiment
     results = run_multivisit_experiment(

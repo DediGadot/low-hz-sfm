@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SfM Debug Report - {{ experiment_name }}</title>
+    <style>
+        /* Global Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        /* Header */
+        header {
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.2em;
+            margin-bottom: 10px;
+        }
+
+        .meta-info {
+            color: #7f8c8d;
+            font-size: 0.95em;
+        }
+
+        .meta-info strong {
+            color: #34495e;
+        }
+
+        /* Summary Section */
+        #summary {
+            background: #ecf0f1;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #3498db;
+        }
+
+        .summary-card h3 {
+            color: #2c3e50;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+
+        .summary-card .status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .status.complete {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        /* Warnings */
+        .warnings {
+            margin-top: 20px;
+        }
+
+        .warning-box {
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+
+        .warning-box.error {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #721c24;
+        }
+
+        .warning-box.warning {
+            background: #fff3cd;
+            border-color: #ffc107;
+            color: #856404;
+        }
+
+        .warning-box strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        /* Navigation */
+        nav {
+            background: #34495e;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+        }
+
+        nav a {
+            color: white;
+            text-decoration: none;
+            padding: 8px 15px;
+            margin-right: 10px;
+            border-radius: 4px;
+            display: inline-block;
+            transition: background 0.3s;
+        }
+
+        nav a:hover {
+            background: #4CAF50;
+        }
+
+        /* Section Styles */
+        section {
+            margin-bottom: 40px;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 6px;
+        }
+
+        section h2 {
+            color: #2c3e50;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #4CAF50;
+        }
+
+        section.collapsible h2 {
+            cursor: pointer;
+            position: relative;
+            padding-right: 30px;
+        }
+
+        section.collapsible h2::after {
+            content: '▼';
+            position: absolute;
+            right: 10px;
+            transition: transform 0.3s;
+        }
+
+        section.collapsible.collapsed h2::after {
+            transform: rotate(-90deg);
+        }
+
+        section.collapsible.collapsed .section-content {
+            display: none;
+        }
+
+        /* Visualization Grid */
+        .viz-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        .viz-item {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .viz-item h3 {
+            color: #34495e;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+
+        .viz-item img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .viz-info {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            background: #ecf0f1;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        /* Match Pair Styles */
+        .match-pair {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .match-pair h3 {
+            color: #34495e;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+
+        .match-pair img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+
+        /* Reconstruction Styles */
+        .reconstruction-container {
+            background: white;
+            padding: 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .reconstruction-container iframe {
+            width: 100%;
+            height: 700px;
+            border: none;
+            border-radius: 4px;
+        }
+
+        .reconstruction-container img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #95a5a6;
+            font-style: italic;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 15px;
+            }
+
+            h1 {
+                font-size: 1.6em;
+            }
+
+            .viz-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-grid {
+                grid-template-columns: 1fr;
+            }
+
+            nav a {
+                display: block;
+                margin-bottom: 5px;
+            }
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ecf0f1;
+            text-align: center;
+            color: #95a5a6;
+            font-size: 0.9em;
+        }
+    </style>
+    <script>
+        // Collapsible section toggle
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            section.classList.toggle('collapsed');
+        }
+
+        // Initialize collapsible sections on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // All sections start expanded
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SfM Pipeline Debug Report</h1>
+            <div class="meta-info">
+                <strong>Experiment:</strong> {{ experiment_name }} |
+                <strong>Generated:</strong> {{ timestamp }}
+                {% if total_runtime > 0 %}
+                | <strong>Runtime:</strong> {{ "%.1f"|format(total_runtime) }}s
+                {% endif %}
+            </div>
+        </header>
+
+        <!-- Summary Section -->
+        <section id="summary">
+            <h2>Pipeline Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-card">
+                    <h3>Stage 1: Feature Extraction</h3>
+                    {% if features_complete %}
+                    <span class="status complete">✓ Complete</span>
+                    <p>{{ features|length }} frames visualized</p>
+                    {% else %}
+                    <span class="status pending">⏳ Running...</span>
+                    {% endif %}
+                </div>
+
+                <div class="summary-card">
+                    <h3>Stage 2: Feature Matching</h3>
+                    {% if matching_complete %}
+                    <span class="status complete">✓ Complete</span>
+                    <p>{{ matches|length }} pairs visualized</p>
+                    {% else %}
+                    <span class="status pending">⏳ Running...</span>
+                    {% endif %}
+                </div>
+
+                <div class="summary-card">
+                    <h3>Stage 3: Reconstruction</h3>
+                    {% if reconstruction_complete %}
+                    <span class="status complete">✓ Complete</span>
+                    <p>{{ reconstruction.num_cameras }} cameras registered</p>
+                    {% else %}
+                    <span class="status pending">⏳ Running...</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quality Warnings -->
+            {% if warnings %}
+            <div class="warnings">
+                <h3>Quality Warnings</h3>
+                {% for warning in warnings %}
+                <div class="warning-box {{ warning.level }}">
+                    <strong>{{ warning.level|upper }}</strong>
+                    {{ warning.message }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </section>
+
+        <!-- Navigation -->
+        <nav>
+            <a href="#features">Features</a>
+            <a href="#matching">Matching</a>
+            <a href="#reconstruction">Reconstruction</a>
+        </nav>
+
+        <!-- Features Section -->
+        <section id="features" class="collapsible">
+            <h2 onclick="toggleSection('features')">Stage 1: Feature Extraction</h2>
+            <div class="section-content">
+                {% if features %}
+                <div class="viz-grid">
+                    {% for feature in features %}
+                    <div class="viz-item">
+                        <h3>Frame {{ feature.index }}: {{ feature.name }}</h3>
+                        <img src="{{ feature.keypoints_img }}" alt="Keypoints for frame {{ feature.index }}">
+                        <img src="{{ feature.stats_img }}" alt="Statistics for frame {{ feature.index }}">
+                        <div class="viz-info">
+                            <strong>Frame Index:</strong> {{ feature.index }}<br>
+                            <strong>Filename:</strong> {{ feature.name }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    ⏳ Feature extraction visualizations will appear here...
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- Matching Section -->
+        <section id="matching" class="collapsible">
+            <h2 onclick="toggleSection('matching')">Stage 2: Feature Matching</h2>
+            <div class="section-content">
+                {% if matches %}
+                {% for match in matches %}
+                <div class="match-pair">
+                    <h3>Match Pair: Frame {{ match.idx1 }} ↔ Frame {{ match.idx2 }} (Gap: {{ match.gap }} frames)</h3>
+                    <img src="{{ match.match_img }}" alt="Matches between frames {{ match.idx1 }} and {{ match.idx2 }}">
+                    <div class="viz-info">
+                        <strong>Frame {{ match.idx1 }}:</strong> {{ match.name1 }}<br>
+                        <strong>Frame {{ match.idx2 }}:</strong> {{ match.name2 }}<br>
+                        <strong>Temporal Gap:</strong> {{ match.gap }} frames
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="empty-state">
+                    ⏳ Feature matching visualizations will appear here...
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- Reconstruction Section -->
+        <section id="reconstruction" class="collapsible">
+            <h2 onclick="toggleSection('reconstruction')">Stage 3: Reconstruction</h2>
+            <div class="section-content">
+                {% if reconstruction_complete %}
+                <div class="reconstruction-container">
+                    <h3>Camera Trajectory with Reprojection Errors</h3>
+                    <p style="color: #7f8c8d; margin-bottom: 15px;">
+                        Interactive 3D visualization. Use mouse to rotate, zoom, and explore.
+                        Cameras are color-coded by reprojection error: green (good) to red (problematic).
+                    </p>
+                    <iframe src="{{ reconstruction.cameras_html }}"></iframe>
+                </div>
+
+                <div class="reconstruction-container">
+                    <h3>Reconstruction Statistics</h3>
+                    <img src="{{ reconstruction.stats_img }}" alt="Reconstruction statistics dashboard">
+                    <div class="viz-info" style="margin-top: 20px;">
+                        <strong>Registered Cameras:</strong> {{ reconstruction.num_cameras }}<br>
+                        <strong>3D Points:</strong> {{ reconstruction.num_points }}<br>
+                        <strong>Mean Reprojection Error:</strong> {{ "%.3f"|format(reconstruction.mean_reproj_error) }} pixels<br>
+                        <strong>High Error Observations:</strong> {{ "%.1f"|format(reconstruction.pct_high_error) }}% (>2px)
+                    </div>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    ⏳ Reconstruction visualizations will appear here...
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            Generated by SfM Pipeline Visualizer | {{ timestamp }}
+        </footer>
+    </div>
+</body>
+</html>

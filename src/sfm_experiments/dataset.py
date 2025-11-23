@@ -21,6 +21,16 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
 import cv2
+import sys
+
+# BUGFIX: Conditional import of fcntl (Unix-only module) for cross-platform compatibility
+if sys.platform != 'win32':
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+else:
+    fcntl = None
 
 from rosbags.rosbag1 import Reader as Rosbag1Reader
 from rosbags.typesys import Stores, get_typestore
@@ -71,6 +81,8 @@ def extract_frames_from_rosbag(
     """
     if not bag_path.exists():
         raise FileNotFoundError(f"ROS bag not found: {bag_path}")
+    if target_fps <= 0:
+        raise ValueError(f"target_fps must be positive, got {target_fps}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Extracting frames from: {bag_path.name}")
@@ -130,6 +142,25 @@ def extract_frames_from_rosbag(
                     # Deserialize ROS message
                     msg = typestore.deserialize_ros1(rawdata, connection.msgtype)
 
+                    # BUGFIX: Validate message has required attributes before processing
+                    if not all(hasattr(msg, attr) for attr in ['height', 'width', 'encoding', 'data']):
+                        logger.warning("Message missing required attributes, skipping")
+                        pbar.update(1)
+                        continue
+
+                    if not isinstance(msg.height, int) or not isinstance(msg.width, int):
+                        logger.warning("Invalid image dimensions in message, skipping")
+                        pbar.update(1)
+                        continue
+
+                    # BUGFIX: Validate message size to prevent memory exhaustion
+                    MAX_IMAGE_SIZE = 100 * 1024 * 1024  # 100 MB limit
+                    data_size = len(msg.data) if isinstance(msg.data, (bytes, list)) else 0
+                    if data_size > MAX_IMAGE_SIZE:
+                        logger.warning(f"Image data too large ({data_size} bytes), skipping frame")
+                        pbar.update(1)
+                        continue
+
                     # Convert data to numpy array
                     # msg.data can be bytes or list depending on deserialization
                     if isinstance(msg.data, bytes):
@@ -139,12 +170,34 @@ def extract_frames_from_rosbag(
 
                     # Convert ROS image to numpy array
                     # Handle different encodings
+                    # BUGFIX: Validate image data size matches expected dimensions
                     if msg.encoding == "rgb8":
+                        expected_size = msg.height * msg.width * 3
+                        if len(img_data) != expected_size:
+                            logger.warning(
+                                f"Image data size mismatch: expected {expected_size}, got {len(img_data)}, skipping frame"
+                            )
+                            pbar.update(1)
+                            continue
                         img = img_data.reshape(msg.height, msg.width, 3)
                         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                     elif msg.encoding == "bgr8":
+                        expected_size = msg.height * msg.width * 3
+                        if len(img_data) != expected_size:
+                            logger.warning(
+                                f"Image data size mismatch: expected {expected_size}, got {len(img_data)}, skipping frame"
+                            )
+                            pbar.update(1)
+                            continue
                         img = img_data.reshape(msg.height, msg.width, 3)
                     elif msg.encoding == "mono8":
+                        expected_size = msg.height * msg.width
+                        if len(img_data) != expected_size:
+                            logger.warning(
+                                f"Image data size mismatch: expected {expected_size}, got {len(img_data)}, skipping frame"
+                            )
+                            pbar.update(1)
+                            continue
                         img = img_data.reshape(msg.height, msg.width)
                     else:
                         logger.warning(
@@ -156,12 +209,19 @@ def extract_frames_from_rosbag(
                     # Save frame
                     frame_id = len(saved_frames)
                     # Preserve timestamp in filename to allow GT pose alignment
-                    frame_filename = f"frame_{int(current_time * 1e9)}.jpg"
+                    # BUGFIX: Use safe timestamp conversion with bounds checking
+                    timestamp_ns = min(int(current_time * 1e9), sys.maxsize)
+                    frame_filename = f"frame_{timestamp_ns:019d}.jpg"  # Fixed width for sorting
                     frame_path = output_dir / frame_filename
 
-                    cv2.imwrite(
+                    # BUGFIX: Check cv2.imwrite success
+                    success = cv2.imwrite(
                         str(frame_path), img, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
                     )
+                    if not success:
+                        logger.error(f"Failed to write frame to {frame_path}")
+                        pbar.update(1)
+                        continue
 
                     metadata_lines.append(f"{frame_filename},{current_time:.9f}\n")
 
@@ -178,10 +238,24 @@ def extract_frames_from_rosbag(
 
                 pbar.update(1)
 
-    # Persist metadata alongside frames
+    # BUGFIX: Persist metadata alongside frames with file locking to prevent race conditions
     try:
-        with open(metadata_path, "w") as meta_file:
-            meta_file.writelines(metadata_lines)
+        # Use exclusive locking when available (Unix/Linux/Mac)
+        with open(metadata_path, "w", encoding='utf-8') as meta_file:
+            # BUGFIX: Check fcntl is not None before using it (Windows compatibility)
+            if sys.platform != "win32" and fcntl is not None and hasattr(fcntl, 'LOCK_EX'):
+                try:
+                    fcntl.flock(meta_file.fileno(), fcntl.LOCK_EX)
+                    meta_file.writelines(metadata_lines)
+                    fcntl.flock(meta_file.fileno(), fcntl.LOCK_UN)
+                except (OSError, AttributeError, IOError) as e:
+                    # Locking not supported or failed - write anyway
+                    logger.debug(f"File locking unavailable: {e}, writing metadata without lock")
+                    meta_file.writelines(metadata_lines)
+            else:
+                # Windows or fcntl not available - write without lock
+                # Note: For production Windows use, consider using msvcrt.locking or portalocker library
+                meta_file.writelines(metadata_lines)
         logger.info(f"Wrote frame metadata to {metadata_path}")
     except Exception as exc:  # pragma: no cover - best effort
         logger.warning(f"Failed to write metadata file {metadata_path}: {exc}")

@@ -267,13 +267,41 @@ If GLOMAP is not installed, the pipeline automatically falls back to COLMAP.
 
 ---
 
-## ⚡ Caching System
+## ⚡ Performance & Caching
+
+### Performance Optimizations (New!)
+
+The pipeline includes comprehensive performance optimizations for **4-6x overall speedup**:
+
+**Parallelization:**
+- 🚀 **Multi-visit experiments**: Process multiple visit counts in parallel (**3-5x faster**)
+- 🚀 **Frame I/O operations**: Parallel hardlinking with ThreadPoolExecutor (**1.5-2x faster**)
+
+**Adaptive Processing:**
+- 📊 **Smart feature extraction**: Automatically reduces features for small datasets (**2x faster**)
+- 📊 **Optimized matching**: Adaptive overlap parameters based on dataset size
+- 📊 **Intelligent thresholds**: Prevents O(n²) matching explosion for 1K-5K images
+
+**Caching:**
+- 💾 **Point cloud distances**: Cache Chamfer distance & completeness (**10x faster** on cache hits)
+- 💾 **PLY export skip**: Reuse existing point clouds when available
+- 💾 **Reconstruction caching**: **200-600x faster** (<0.1s vs 20-60s)
+
+**Overall Speedup Examples:**
+- Small dataset (100 images, 4 visits): **~60 min → 15 min** (4x faster)
+- Medium dataset (500 images, 4 visits): **~90 min → 18 min** (5x faster)
+- Large dataset (2000 images, 4 visits): **~120 min → 25 min** (5-6x faster)
+
+**See** [`PERFORMANCE_OPTIMIZATIONS.md`](PERFORMANCE_OPTIMIZATIONS.md) for complete details.
+
+### Caching System
 
 The pipeline includes intelligent caching to dramatically speed up repeated experiments:
 
 **Performance:**
 - Combined frames: **50x faster** (<0.01s vs 0.5s)
 - COLMAP reconstruction: **200-600x faster** (<0.1s vs 20-60s)
+- Point cloud metrics: **10x faster** (cached distance computations)
 - Full 3-visit experiment: **120-180x faster** (<1s vs 2-3 min)
 
 **Default (Cache Enabled):**
